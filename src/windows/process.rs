@@ -17,6 +17,7 @@ use libc::{c_void, memcpy};
 use Pid;
 use ProcessExt;
 
+#[cfg(not(target_os = "thumbv7a-pc-windows-msvc"))]
 use ntapi::ntpsapi::{
     NtQueryInformationProcess, ProcessBasicInformation, PROCESS_BASIC_INFORMATION,
 };
@@ -154,6 +155,7 @@ unsafe fn get_exe(process_handler: HANDLE, h_mod: *mut c_void) -> PathBuf {
 
 impl Process {
     #[allow(clippy::uninit_assumed_init)]
+    #[cfg(not(target_os = "thumbv7a-pc-windows-msvc"))]
     pub(crate) fn new_from_pid(pid: Pid) -> Option<Process> {
         let process_handler = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid as _) };
         if process_handler.is_null() {
@@ -182,6 +184,11 @@ impl Process {
             },
             process_handler,
         ))
+    }
+
+    #[cfg(target_os = "thumbv7a-pc-windows-msvc")]
+    pub(crate) fn new_from_pid(pid: Pid) -> Option<Process> {
+        None
     }
 
     pub(crate) fn new_full(
@@ -402,6 +409,7 @@ unsafe fn get_start_time(handle: HANDLE) -> u64 {
     tmp / 10_000_000 - 11_644_473_600
 }
 
+#[cfg(not(target_os = "thumbv7a-pc-windows-msvc"))]
 fn get_cmd_line(handle: HANDLE) -> Vec<String> {
     use ntapi::ntpebteb::{PEB, PPEB};
     use ntapi::ntrtl::{PRTL_USER_PROCESS_PARAMETERS, RTL_USER_PROCESS_PARAMETERS};
@@ -490,6 +498,11 @@ fn get_cmd_line(handle: HANDLE) -> Vec<String> {
 
         res
     }
+}
+
+#[cfg(target_os = "thumbv7a-pc-windows-msvc")]
+fn get_cmd_line(handle: HANDLE) -> Vec<String> {
+    Vec::new()
 }
 
 unsafe fn get_proc_env(_handle: HANDLE, _pid: u32, _name: &str) -> Vec<String> {
