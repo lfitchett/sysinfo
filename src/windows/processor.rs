@@ -14,8 +14,6 @@ use windows::tools::KeyHandler;
 use LoadAvg;
 use ProcessorExt;
 
-use ntapi::ntpoapi::PROCESSOR_POWER_INFORMATION;
-
 use winapi::shared::minwindef::FALSE;
 use winapi::shared::winerror::ERROR_SUCCESS;
 use winapi::um::handleapi::CloseHandle;
@@ -380,28 +378,5 @@ pub fn get_key_used(p: &mut Processor) -> &mut Option<KeyHandler> {
 // if your PC has more than 64 logical processors installed, use GetActiveProcessorCount() or
 // GetLogicalProcessorInformation() to determine the total number of logical processors installed.
 pub fn get_frequencies(nb_processors: usize) -> Vec<u64> {
-    let size = nb_processors * mem::size_of::<PROCESSOR_POWER_INFORMATION>();
-    let mut infos: Vec<PROCESSOR_POWER_INFORMATION> = Vec::with_capacity(nb_processors);
-
-    if unsafe {
-        CallNtPowerInformation(
-            ProcessorInformation,
-            null_mut(),
-            0,
-            infos.as_mut_ptr() as _,
-            size as _,
-        )
-    } == 0
-    {
-        unsafe {
-            infos.set_len(nb_processors);
-        }
-        // infos.Number
-        infos
-            .into_iter()
-            .map(|i| i.CurrentMhz as u64)
-            .collect::<Vec<_>>()
-    } else {
-        vec![0; nb_processors]
-    }
+    Vec::new()
 }

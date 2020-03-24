@@ -72,7 +72,6 @@ cfg_if! {
         mod windows;
         use windows as sys;
         extern crate winapi;
-        extern crate ntapi;
 
         #[cfg(test)]
         const MIN_USERS: usize = 1;
