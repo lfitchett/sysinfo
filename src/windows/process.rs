@@ -5,7 +5,7 @@
 //
 
 use std::fmt::{self, Debug};
-use std::mem::{size_of, zeroed, MaybeUninit};
+use std::mem::{size_of, zeroed};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process;
@@ -17,11 +17,7 @@ use libc::{c_void, memcpy};
 use Pid;
 use ProcessExt;
 
-#[cfg(not(target_os = "thumbv7a-pc-windows-msvc"))]
-use ntapi::ntpsapi::{
-    NtQueryInformationProcess, ProcessBasicInformation, PROCESS_BASIC_INFORMATION,
-};
-use winapi::shared::minwindef::{DWORD, FALSE, FILETIME, MAX_PATH, TRUE};
+use winapi::shared::minwindef::{DWORD, FALSE, FILETIME, MAX_PATH};
 use winapi::um::handleapi::CloseHandle;
 use winapi::um::processthreadsapi::{GetProcessTimes, OpenProcess};
 use winapi::um::psapi::{
@@ -154,39 +150,6 @@ unsafe fn get_exe(process_handler: HANDLE, h_mod: *mut c_void) -> PathBuf {
 }
 
 impl Process {
-    #[allow(clippy::uninit_assumed_init)]
-    #[cfg(not(target_os = "thumbv7a-pc-windows-msvc"))]
-    pub(crate) fn new_from_pid(pid: Pid) -> Option<Process> {
-        let process_handler = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid as _) };
-        if process_handler.is_null() {
-            return None;
-        }
-        let mut info: PROCESS_BASIC_INFORMATION = unsafe { MaybeUninit::uninit().assume_init() };
-        if unsafe {
-            NtQueryInformationProcess(
-                process_handler,
-                ProcessBasicInformation,
-                &mut info as *mut _ as *mut _,
-                size_of::<PROCESS_BASIC_INFORMATION>() as _,
-                null_mut(),
-            )
-        } != 0
-        {
-            unsafe { CloseHandle(process_handler) };
-            return None;
-        }
-        Some(Process::new_with_handle(
-            pid,
-            if info.InheritedFromUniqueProcessId as usize != 0 {
-                Some(info.InheritedFromUniqueProcessId as usize)
-            } else {
-                None
-            },
-            process_handler,
-        ))
-    }
-
-    #[cfg(target_os = "thumbv7a-pc-windows-msvc")]
     pub(crate) fn new_from_pid(pid: Pid) -> Option<Process> {
         None
     }
@@ -409,99 +372,7 @@ unsafe fn get_start_time(handle: HANDLE) -> u64 {
     tmp / 10_000_000 - 11_644_473_600
 }
 
-#[cfg(not(target_os = "thumbv7a-pc-windows-msvc"))]
-fn get_cmd_line(handle: HANDLE) -> Vec<String> {
-    use ntapi::ntpebteb::{PEB, PPEB};
-    use ntapi::ntrtl::{PRTL_USER_PROCESS_PARAMETERS, RTL_USER_PROCESS_PARAMETERS};
-    use winapi::shared::basetsd::SIZE_T;
-    use winapi::um::memoryapi::ReadProcessMemory;
-
-    unsafe {
-        let mut pinfo = std::mem::MaybeUninit::<PROCESS_BASIC_INFORMATION>::uninit();
-        if NtQueryInformationProcess(
-            handle,
-            0, // ProcessBasicInformation
-            pinfo.as_mut_ptr() as *mut _,
-            size_of::<PROCESS_BASIC_INFORMATION>() as u32,
-            null_mut(),
-        ) != 0
-        {
-            return Vec::new();
-        }
-        let pinfo = pinfo.assume_init();
-
-        let ppeb: PPEB = pinfo.PebBaseAddress;
-        let mut peb_copy = std::mem::MaybeUninit::<PEB>::uninit();
-        if ReadProcessMemory(
-            handle,
-            ppeb as *mut _,
-            peb_copy.as_mut_ptr() as *mut _,
-            size_of::<PEB>() as SIZE_T,
-            ::std::ptr::null_mut(),
-        ) != TRUE
-        {
-            return Vec::new();
-        }
-        let peb_copy = peb_copy.assume_init();
-
-        let proc_param = peb_copy.ProcessParameters;
-        let mut rtl_proc_param_copy =
-            std::mem::MaybeUninit::<RTL_USER_PROCESS_PARAMETERS>::uninit();
-        if ReadProcessMemory(
-            handle,
-            proc_param as *mut PRTL_USER_PROCESS_PARAMETERS as *mut _,
-            rtl_proc_param_copy.as_mut_ptr() as *mut _,
-            size_of::<RTL_USER_PROCESS_PARAMETERS>() as SIZE_T,
-            ::std::ptr::null_mut(),
-        ) != TRUE
-        {
-            return Vec::new();
-        }
-        let rtl_proc_param_copy = rtl_proc_param_copy.assume_init();
-
-        let len = rtl_proc_param_copy.CommandLine.Length as usize;
-        let len = len / 2;
-
-        // For len symbols + '\0'
-        let mut buffer_copy: Vec<u16> = Vec::with_capacity(len + 1);
-        buffer_copy.set_len(len);
-        if ReadProcessMemory(
-            handle,
-            rtl_proc_param_copy.CommandLine.Buffer as *mut _,
-            buffer_copy.as_mut_ptr() as *mut _,
-            len * 2 as SIZE_T,
-            ::std::ptr::null_mut(),
-        ) != TRUE
-        {
-            return Vec::new();
-        }
-        buffer_copy.push(0);
-
-        // Get argc and argv from command line
-        let mut argc = MaybeUninit::<i32>::uninit();
-        let argv_p =
-            winapi::um::shellapi::CommandLineToArgvW(buffer_copy.as_ptr(), argc.as_mut_ptr());
-        if argv_p.is_null() {
-            return Vec::new();
-        }
-        let argc = argc.assume_init();
-        let argv = std::slice::from_raw_parts(argv_p, argc as usize);
-
-        let mut res = Vec::new();
-        for arg in argv {
-            let len = libc::wcslen(*arg);
-            let str_slice = std::slice::from_raw_parts(*arg, len);
-            res.push(String::from_utf16_lossy(str_slice));
-        }
-
-        winapi::um::winbase::LocalFree(argv_p as *mut _);
-
-        res
-    }
-}
-
-#[cfg(target_os = "thumbv7a-pc-windows-msvc")]
-fn get_cmd_line(handle: HANDLE) -> Vec<String> {
+fn get_cmd_line(_handle: HANDLE) -> Vec<String> {
     Vec::new()
 }
 
